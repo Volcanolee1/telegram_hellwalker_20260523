@@ -1,0 +1,20 @@
+# 排除 Python 编译缓存垃圾
+__pycache__/
+*.pyc
+
+# 排除敏感配置文件（防止你的中转 API Key 泄露到网上）
+config.json
+
+# 排除本地生成的庞大数据库文件（保持仓库轻量，云端不存本地数据）
+*.db
+commander.db
+news_data.db
+
+# 排除本地代理浏览器的缓存、用户数据和隐私（这里面全是本地缓存，绝对不能提交）
+automation_chrome/
+
+# 排除包含你脱敏配置和私密信息的 Claude 配置目录
+.claude/
+
+# 排除已经解压的第三方插件源码包（GitHub 不需要存别人开源的代码）
+bypass-paywalls-chrome-clean-master/
