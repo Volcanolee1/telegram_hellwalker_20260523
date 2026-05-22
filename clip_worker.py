@@ -90,13 +90,19 @@ def process_queue(limit: int) -> None:
 
         try:
             for i, item in enumerate(pending, 1):
-                qid, source, url, title_hint = item["id"], item["source"], item["url"], item["title"]
-                print(f"\n[{i}/{len(pending)}] {source}  {url}")
+                qid     = item["id"]
+                source  = item["source"]
+                url     = item["url"]
+                title_hint = item["title"]
+                country = item.get("country")
+                tags    = item.get("tags")
+                print(f"\n[{i}/{len(pending)}] {source}({country or '?'})  {url}")
 
                 news_db.mark_clipping(qid)
                 try:
                     title, body = clip_one(page, url)
-                    news_db.mark_clipped(qid, source, url, title or (title_hint or ""), body)
+                    news_db.mark_clipped(qid, source, url, title or (title_hint or ""), body,
+                                         country=country, tags=tags)
                     ok_count += 1
                     print(f"  ✅ 入库")
                 except Exception as e:

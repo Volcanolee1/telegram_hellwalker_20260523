@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS article_queue (
     source          TEXT NOT NULL,
     url             TEXT UNIQUE NOT NULL,
     title           TEXT,
+    country         TEXT,
+    tags            TEXT,
     discovered_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     status          TEXT NOT NULL DEFAULT 'pending',
     -- pending → clipping → clipped | failed
@@ -60,7 +62,12 @@ CREATE INDEX IF NOT EXISTS idx_article_publish ON article(publish_status);
 -- idx_article_summary 索引在 _migrate() 里建，因为旧 DB 这时候还没 summary_status 列
 """
 
-# 动态迁移：旧 DB 没有 summary_* / publish_* 列时自动补上
+# 动态迁移：旧 DB 没有对应列时自动补上
+QUEUE_NEW_COLUMNS = {
+    "country": "country TEXT",
+    "tags":    "tags TEXT",
+}
+
 ARTICLE_NEW_COLUMNS = {
     "summary":             "summary TEXT",
     "summary_status":      "summary_status TEXT DEFAULT 'pending'",
@@ -70,10 +77,19 @@ ARTICLE_NEW_COLUMNS = {
     "summary_error":       "summary_error TEXT",
     "publish_at":          "publish_at TIMESTAMP",
     "publish_error":       "publish_error TEXT",
+    "country":             "country TEXT",
+    "tags":                "tags TEXT",
 }
 
 
 def _migrate(c) -> None:
+    # article_queue 新列
+    existing_queue = {r["name"] for r in c.execute("PRAGMA table_info(article_queue)")}
+    for col, ddl in QUEUE_NEW_COLUMNS.items():
+        if col not in existing_queue:
+            c.execute(f"ALTER TABLE article_queue ADD COLUMN {ddl}")
+            print(f"  + 已为 article_queue 表新增列: {col}")
+    # article 新列
     existing = {r["name"] for r in c.execute("PRAGMA table_info(article)")}
     for col, ddl in ARTICLE_NEW_COLUMNS.items():
         if col not in existing:
@@ -133,12 +149,14 @@ def conn():
 
 # ============ 队列写入：巡逻发现新链接 ============
 
-def enqueue(source: str, url: str, title: str | None = None) -> bool:
+def enqueue(source: str, url: str, title: str | None = None,
+            country: str | None = None, tags: str | None = None) -> bool:
     """新链接入队。返回 True 表示是新链接，False 表示已存在。"""
     with _conn() as c:
         cur = c.execute(
-            "INSERT OR IGNORE INTO article_queue (source, url, title) VALUES (?, ?, ?)",
-            (source, url, title),
+            "INSERT OR IGNORE INTO article_queue (source, url, title, country, tags) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (source, url, title, country, tags),
         )
         return cur.rowcount > 0
 
@@ -148,7 +166,7 @@ def enqueue(source: str, url: str, title: str | None = None) -> bool:
 def fetch_pending(limit: int = 10) -> list[dict]:
     with _conn() as c:
         rows = c.execute(
-            "SELECT id, source, url, title FROM article_queue "
+            "SELECT id, source, url, title, country, tags FROM article_queue "
             "WHERE status = 'pending' AND attempt_count < ? "
             "ORDER BY discovered_at ASC LIMIT ?",
             (MAX_ATTEMPTS, limit * 5),   # 多取以便轮询均分
@@ -167,7 +185,8 @@ def mark_clipping(queue_id: int) -> None:
         )
 
 
-def mark_clipped(queue_id: int, source: str, url: str, title: str, body: str) -> None:
+def mark_clipped(queue_id: int, source: str, url: str, title: str, body: str,
+                 country: str | None = None, tags: str | None = None) -> None:
     """clip 成功：把全文落到 article 表，队列条目转 clipped。原子事务。"""
     with _conn() as c:
         c.execute(
@@ -176,9 +195,9 @@ def mark_clipped(queue_id: int, source: str, url: str, title: str, body: str) ->
         )
         c.execute(
             "INSERT OR IGNORE INTO article "
-            "  (queue_id, source, url, title, body, body_length) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (queue_id, source, url, title, body, len(body or "")),
+            "  (queue_id, source, url, title, body, body_length, country, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (queue_id, source, url, title, body, len(body or ""), country, tags),
         )
 
 

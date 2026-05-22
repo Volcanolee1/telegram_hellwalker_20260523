@@ -13,18 +13,15 @@
   python summarizer.py --retry        # 把 status=failed 的也重试一遍
 """
 import argparse
-import json
 import time
-from pathlib import Path
 
 from google import genai
 from google.genai import types
 
+from config_loader import GEMINI_API_KEY, PROXY_URL
 import news_db
 
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-PROXY_URL = "socks5h://127.0.0.1:10808"
 MODEL = "gemini-3.1-flash-lite"
 MAX_INPUT_CHARS = 8000          # 单篇正文最多送多少字符（防止过长 token 浪费）
 DELAY_BETWEEN_S = 1.5           # 每条之间的礼貌间隔
@@ -44,17 +41,9 @@ SYSTEM_INSTRUCTION = (
 )
 
 
-def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(f"找不到 {CONFIG_PATH}")
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def make_client(api_key: str) -> genai.Client:
-    """构建挂了 SOCKS5 的 Gemini client。"""
+def make_client() -> genai.Client:
     http_options = types.HttpOptions(client_args={"proxy": PROXY_URL})
-    return genai.Client(api_key=api_key, http_options=http_options)
+    return genai.Client(api_key=GEMINI_API_KEY, http_options=http_options)
 
 
 def summarize_one(client: genai.Client, source: str, title: str, body: str) -> str:
@@ -89,13 +78,11 @@ def reset_failed_to_pending() -> int:
 
 
 def run(limit: int, retry: bool) -> None:
-    cfg = load_config()
-    api_key = cfg.get("GEMINI_API_KEY")
-    if not api_key:
-        print("❌ config.json 缺少 GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        print("❌ GEMINI_API_KEY 未配置，请检查 config.json")
         return
 
-    news_db.init_db()  # 顺便触发 schema 迁移
+    news_db.init_db()
 
     if retry:
         n_reset = reset_failed_to_pending()
@@ -108,9 +95,9 @@ def run(limit: int, retry: bool) -> None:
         return
 
     print(f"📥 取出 {len(pending)} 条待摘要文章")
-    print(f"🔌 通过 SOCKS5 ({PROXY_URL}) 接入 Gemini ({MODEL})\n")
+    print(f"🔌 通过 {PROXY_URL} 接入 Gemini ({MODEL})\n")
 
-    client = make_client(api_key)
+    client = make_client()
     ok, fail = 0, 0
     aborted = False
 

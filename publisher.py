@@ -13,44 +13,58 @@
   python publisher.py --retry          # 把 failed 重置为 pending 后再发
 """
 import argparse
-import json
-import os
 import time
 from html import escape
-from pathlib import Path
 
 import telebot
 
+from config_loader import TG_BOT_TOKEN, US_CHANNEL, CN_CHANNEL, PROXY_URL
 import news_db
 
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
-PROXY_URL = "socks5h://127.0.0.1:10808"
 DELAY_BETWEEN_S = 2.0   # 礼貌间隔，TG 频道 30 msg/sec 上限远高于这个，纯防节奏太密
 
+CHANNEL_MAP = {"US": US_CHANNEL, "CN": CN_CHANNEL}
 
-# 来源 → 频道 路由表。US → @HellWalker_DailyNews；CN → @HellWalker_CN_DailyNews。
+
+# 来源 → 频道 路由表。CN 来源 → @HellWalker_CN_DailyNews；其余 → @HellWalker_DailyNews。
 SOURCE_TO_CHANNEL = {
-    "Bloomberg":   "US",
-    "Reuters":     "US",
-    "NYT":         "US",
-    "SCMP":        "US",
-    "APNews":      "US",
-    "France24":    "US",
-    "GlobalTimes": "CN",
+    # US
+    "Bloomberg":     "US",
+    "Reuters":       "US",
+    "NYT":           "US",
+    "APNews":        "US",
+    "Politico":      "US",
+    "CNBC":          "US",
+    "TechCrunch":    "US",
+    "DefenseNews":   "US",
+    "WarOnTheRocks": "US",
+    # UK
+    "BBC":           "US",
+    "TheGuardian":   "US",
+    "FT":            "US",
+    # EU
+    "France24":      "US",
+    "DW":            "US",
+    "EUobserver":    "US",
+    # CN
+    "GlobalTimes":   "CN",
+    "SCMP":          "CN",
+    "XinhuaNet":     "CN",
+    # JP
+    "NHKWorld":      "US",
+    "NikkeiAsia":    "US",
 }
 DEFAULT_CHANNEL = "US"
 
 
-def load_config() -> dict:
-    with CONFIG_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def setup_proxy() -> None:
-    """telebot 用 requests 发请求，requests 自动读 env var；这是最干净的代理注入方式。"""
-    os.environ["http_proxy"] = PROXY_URL
-    os.environ["https_proxy"] = PROXY_URL
+def resolve_channel(source: str) -> tuple[str, str]:
+    """返回 (region_label, channel_id)。"""
+    region = SOURCE_TO_CHANNEL.get(source, DEFAULT_CHANNEL)
+    channel = CHANNEL_MAP.get(region)
+    if not channel:
+        raise RuntimeError(f"未找到 {region} 对应的频道，请检查 config.json 和 CHANNEL_MAP")
+    return region, channel
 
 
 def format_message(source: str, title: str, url: str, summary: str) -> str:
@@ -62,21 +76,9 @@ def format_message(source: str, title: str, url: str, summary: str) -> str:
     )
 
 
-def resolve_channel(cfg: dict, source: str) -> tuple[str, str]:
-    """返回 (region_label, channel_id)。"""
-    region = SOURCE_TO_CHANNEL.get(source, DEFAULT_CHANNEL)
-    key = f"{region}_CHANNEL"
-    channel = cfg.get(key)
-    if not channel:
-        raise RuntimeError(f"config.json 缺少 {key}")
-    return region, channel
-
-
 def run(limit: int, dry_run: bool, retry: bool) -> None:
-    cfg = load_config()
-    tg_token = cfg.get("TG_BOT_TOKEN")
-    if not tg_token:
-        print("❌ config.json 缺少 TG_BOT_TOKEN")
+    if not TG_BOT_TOKEN:
+        print("❌ TG_BOT_TOKEN 未配置，请检查 config.json")
         return
 
     news_db.init_db()
@@ -95,10 +97,9 @@ def run(limit: int, dry_run: bool, retry: bool) -> None:
     if dry_run:
         print("🧪 DRY-RUN：只预览消息，不真发\n")
     else:
-        setup_proxy()
-        print(f"🔌 通过 SOCKS5 ({PROXY_URL}) 接入 Telegram\n")
+        print(f"🔌 通过 {PROXY_URL} 接入 Telegram\n")
 
-    bot = telebot.TeleBot(tg_token) if not dry_run else None
+    bot = telebot.TeleBot(TG_BOT_TOKEN) if not dry_run else None
     ok, fail, aborted = 0, 0, False
 
     for i, art in enumerate(pending, 1):
@@ -109,7 +110,7 @@ def run(limit: int, dry_run: bool, retry: bool) -> None:
         summary = art["summary"] or ""
 
         try:
-            region, channel = resolve_channel(cfg, source)
+            region, channel = resolve_channel(source)
         except Exception as e:
             news_db.mark_publish_failed(aid, str(e))
             fail += 1
