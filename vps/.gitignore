@@ -2,8 +2,7 @@
 __pycache__/
 *.pyc
 
-# 排除敏感配置文件（防止 API Key 泄露到网上）
-config.yaml
+# 排除敏感配置文件（防止你的中转 API Key 泄露到网上）
 config.json
 
 # 排除本地生成的庞大数据库文件（保持仓库轻量，云端不存本地数据）

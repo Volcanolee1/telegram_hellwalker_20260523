@@ -10,12 +10,11 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from patrol import HOMEPAGES  # 复用同一份精筛正则
+from sources import HOMEPAGES
 
 DB = Path(__file__).parent / "commander.db"
 
-# source -> 正则 的快速查表
-SOURCE_RE = {src: art_re for src, _, _, art_re in HOMEPAGES}
+SOURCE_RE = {s.name: s.article_re for s in HOMEPAGES}
 
 
 def find_bad_rows(conn) -> tuple[list[tuple], list[tuple]]:

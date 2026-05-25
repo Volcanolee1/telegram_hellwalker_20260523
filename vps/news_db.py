@@ -4,15 +4,9 @@
   article_queue —— 巡逻发现的候选链接，等待 clip
   article       —— clip 成功的成品文章（带全文 body）
 
-pipeline 线性状态机（status 列）：
-  clipped → summarizing → summarized → publishing → published
-                ↓                    ↓
-              failed  ←─────────────┘
-
-每次状态推进由单一 status 列保证，杜绝"已发布但未摘要"这类非法状态。
+故意不复用 V1 的 news_data.db，避免新旧 schema 互相污染。
 """
 import sqlite3
-from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -47,33 +41,25 @@ CREATE TABLE IF NOT EXISTS article (
     body            TEXT,
     body_length     INTEGER,
     clipped_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sync_status     TEXT DEFAULT 'pending',
+    -- pending → synced | failed (向 VPS 同步状态)
+    synced_at       TIMESTAMP,
+    publish_status  TEXT DEFAULT 'pending',
+    -- pending → published | failed (TG 推送状态)
 
-    -- 统一线性状态（替换旧的 sync_status / summary_status / publish_status）
-    status          TEXT NOT NULL DEFAULT 'clipped'
-                    CHECK (status IN ('clipped','summarizing','summarized',
-                                      'publishing','published','failed','skipped')),
-
-    -- 摘要结果
+    -- Stage 2.1 摘要相关（通过 _migrate 动态加列保证旧 DB 也能升上来）
     summary             TEXT,
+    summary_status      TEXT DEFAULT 'pending',
+    -- pending → summarizing → summarized | failed | skipped
     summary_at          TIMESTAMP,
     summary_model       TEXT,
     summary_input_chars INTEGER,
-    summary_error       TEXT,
-
-    -- 发布结果
-    publish_at          TIMESTAMP,
-    publish_error       TEXT,
-
-    -- 旧 sync_status 已废弃，保留列定义仅用于存量数据兼容
-    sync_status     TEXT,
-    synced_at       TIMESTAMP,
-
-    -- 源属性（patrol 阶段写入）
-    country         TEXT,
-    tags            TEXT
+    summary_error       TEXT
 );
 
--- idx_article_status 索引在 _migrate() 里建（旧 DB 还没有 status 列）
+CREATE INDEX IF NOT EXISTS idx_article_sync ON article(sync_status);
+CREATE INDEX IF NOT EXISTS idx_article_publish ON article(publish_status);
+-- idx_article_summary 索引在 _migrate() 里建，因为旧 DB 这时候还没 summary_status 列
 """
 
 # 动态迁移：旧 DB 没有对应列时自动补上
@@ -84,6 +70,7 @@ QUEUE_NEW_COLUMNS = {
 
 ARTICLE_NEW_COLUMNS = {
     "summary":             "summary TEXT",
+    "summary_status":      "summary_status TEXT DEFAULT 'pending'",
     "summary_at":          "summary_at TIMESTAMP",
     "summary_model":       "summary_model TEXT",
     "summary_input_chars": "summary_input_chars INTEGER",
@@ -92,15 +79,31 @@ ARTICLE_NEW_COLUMNS = {
     "publish_error":       "publish_error TEXT",
     "country":             "country TEXT",
     "tags":                "tags TEXT",
-    "summary_status":      "summary_status TEXT DEFAULT 'pending'",
-    "publish_status":      "publish_status TEXT DEFAULT 'pending'",
 }
+
+
+def _migrate(c) -> None:
+    # article_queue 新列
+    existing_queue = {r["name"] for r in c.execute("PRAGMA table_info(article_queue)")}
+    for col, ddl in QUEUE_NEW_COLUMNS.items():
+        if col not in existing_queue:
+            c.execute(f"ALTER TABLE article_queue ADD COLUMN {ddl}")
+            print(f"  + 已为 article_queue 表新增列: {col}")
+    # article 新列
+    existing = {r["name"] for r in c.execute("PRAGMA table_info(article)")}
+    for col, ddl in ARTICLE_NEW_COLUMNS.items():
+        if col not in existing:
+            c.execute(f"ALTER TABLE article ADD COLUMN {ddl}")
+            print(f"  + 已为 article 表新增列: {col}")
+    # 索引补建（CREATE IF NOT EXISTS 幂等）
+    c.execute("CREATE INDEX IF NOT EXISTS idx_article_summary ON article(summary_status)")
 
 MAX_ATTEMPTS = 3
 
 
 def _round_robin(rows: list[dict], limit: int) -> list[dict]:
     """从多来源行里按轮询方式取 limit 条，确保单源不会垄断一批次。"""
+    from collections import defaultdict
     buckets: dict[str, list] = defaultdict(list)
     for r in rows:
         buckets[r["source"]].append(r)
@@ -131,67 +134,13 @@ def _conn():
         c.close()
 
 
-def _migrate(c) -> None:
-    # article_queue 新列
-    existing_queue = {r["name"] for r in c.execute("PRAGMA table_info(article_queue)")}
-    for col, ddl in QUEUE_NEW_COLUMNS.items():
-        if col not in existing_queue:
-            c.execute(f"ALTER TABLE article_queue ADD COLUMN {ddl}")
-            print(f"  + 已为 article_queue 表新增列: {col}")
-
-    # article 新列
-    existing = {r["name"] for r in c.execute("PRAGMA table_info(article)")}
-    for col, ddl in ARTICLE_NEW_COLUMNS.items():
-        if col not in existing:
-            c.execute(f"ALTER TABLE article ADD COLUMN {ddl}")
-            print(f"  + 已为 article 表新增列: {col}")
-
-    # 统一 status 列迁移：旧 DB 用三个独立状态列 → 新 DB 用单一 status
-    if "status" not in existing:
-        c.execute("ALTER TABLE article ADD COLUMN status TEXT NOT NULL DEFAULT 'clipped'")
-        # 从旧列聚合出当前状态：优先取最晚阶段的
-        c.execute("""
-            UPDATE article SET status = CASE
-                WHEN publish_status = 'published'  THEN 'published'
-                WHEN publish_status = 'publishing' THEN 'publishing'
-                WHEN summary_status = 'summarized' THEN 'summarized'
-                WHEN summary_status = 'summarizing' THEN 'summarizing'
-                WHEN summary_status = 'failed' OR publish_status = 'failed' THEN 'failed'
-                ELSE 'clipped'
-            END
-        """)
-        print("  + 已添加统一 status 列并从旧状态列迁移数据")
-
-    # 索引补建（CREATE IF NOT EXISTS 幂等）
-    c.execute("CREATE INDEX IF NOT EXISTS idx_article_status ON article(status)")
-    # 为旧 DB 添加 trigger 约束（等价于新 DB 的 CHECK，SQLite ALTER TABLE 不支持直接加 CHECK）
-    c.execute("""
-        CREATE TRIGGER IF NOT EXISTS check_article_status
-        BEFORE UPDATE ON article
-        WHEN NEW.status NOT IN ('clipped','summarizing','summarized',
-                                'publishing','published','failed','skipped')
-        BEGIN
-            SELECT RAISE(ABORT, 'Invalid pipeline status');
-        END;
-    """)
-    c.execute("""
-        CREATE TRIGGER IF NOT EXISTS check_article_status_insert
-        BEFORE INSERT ON article
-        WHEN NEW.status NOT IN ('clipped','summarizing','summarized',
-                                'publishing','published','failed','skipped')
-        BEGIN
-            SELECT RAISE(ABORT, 'Invalid pipeline status');
-        END;
-    """)
-
-
 def init_db() -> None:
     with _conn() as c:
         c.executescript(SCHEMA)
         _migrate(c)
 
 
-# 公共连接：让外部模块借用同一套 PRAGMA + Row factory
+# 公共连接：让外部模块（summarizer / publisher）借用同一套 PRAGMA + Row factory
 @contextmanager
 def conn():
     with _conn() as c:
@@ -220,7 +169,7 @@ def fetch_pending(limit: int = 10) -> list[dict]:
             "SELECT id, source, url, title, country, tags FROM article_queue "
             "WHERE status = 'pending' AND attempt_count < ? "
             "ORDER BY discovered_at ASC LIMIT ?",
-            (MAX_ATTEMPTS, limit * 5),
+            (MAX_ATTEMPTS, limit * 5),   # 多取以便轮询均分
         ).fetchall()
     return _round_robin([dict(r) for r in rows], limit)
 
@@ -275,50 +224,35 @@ def queue_stats() -> dict:
 
 
 def article_stats() -> dict:
-    """统一状态分布（替代旧的 article_stats / summary_stats / publish_stats）。"""
     with _conn() as c:
         total = c.execute("SELECT COUNT(*) AS n FROM article").fetchone()["n"]
-        rows = c.execute(
-            "SELECT status, COUNT(*) AS n FROM article GROUP BY status"
-        ).fetchall()
-    result = {r["status"]: r["n"] for r in rows}
-    result["total"] = total
-    return result
+        unsynced = c.execute(
+            "SELECT COUNT(*) AS n FROM article WHERE sync_status='pending'"
+        ).fetchone()["n"]
+        unpublished = c.execute(
+            "SELECT COUNT(*) AS n FROM article WHERE publish_status='pending'"
+        ).fetchone()["n"]
+    return {"total": total, "unsynced": unsynced, "unpublished": unpublished}
 
 
-# 保持旧函数签名以兼容现有调用方
 def summary_stats() -> dict:
-    """摘要阶段状态（从统一 status 列派生，兼容旧调用方）。"""
     with _conn() as c:
         rows = c.execute(
-            "SELECT status, COUNT(*) AS n FROM article "
-            "WHERE status IN ('clipped','summarizing','summarized','failed') "
-            "GROUP BY status"
+            "SELECT summary_status, COUNT(*) AS n FROM article GROUP BY summary_status"
         ).fetchall()
-    return {r["status"]: r["n"] for r in rows}
-
-
-def publish_stats() -> dict:
-    """发布阶段状态（从统一 status 列派生，兼容旧调用方）。"""
-    with _conn() as c:
-        rows = c.execute(
-            "SELECT status, COUNT(*) AS n FROM article "
-            "WHERE status IN ('summarized','publishing','published','failed') "
-            "GROUP BY status"
-        ).fetchall()
-    return {r["status"]: r["n"] for r in rows}
+    return {r["summary_status"] or "(null)": r["n"] for r in rows}
 
 
 # ============ Stage 2.1: summarizer 用的查询/写入 ============
 
 def fetch_pending_summary(limit: int = 5) -> list[dict]:
-    """取出待摘要的成品文章（status='clipped'），按来源轮询。"""
+    """取出待摘要的成品文章，按来源轮询确保各源均匀。"""
     with _conn() as c:
         rows = c.execute(
             "SELECT id, source, title, body, url FROM article "
-            "WHERE status = 'clipped' "
+            "WHERE summary_status = 'pending' "
             "ORDER BY id ASC LIMIT ?",
-            (limit * 5,),
+            (limit * 5,),   # 多取以便轮询有足够候选
         ).fetchall()
     return _round_robin([dict(r) for r in rows], limit)
 
@@ -326,7 +260,7 @@ def fetch_pending_summary(limit: int = 5) -> list[dict]:
 def mark_summarizing(article_id: int) -> None:
     with _conn() as c:
         c.execute(
-            "UPDATE article SET status='summarizing' WHERE id = ?",
+            "UPDATE article SET summary_status='summarizing' WHERE id = ?",
             (article_id,),
         )
 
@@ -336,7 +270,7 @@ def mark_summarized(article_id: int, summary: str, model: str, input_chars: int)
         c.execute(
             "UPDATE article SET "
             "  summary = ?, "
-            "  status = 'summarized', "
+            "  summary_status = 'summarized', "
             "  summary_at = CURRENT_TIMESTAMP, "
             "  summary_model = ?, "
             "  summary_input_chars = ?, "
@@ -350,7 +284,7 @@ def mark_summary_failed(article_id: int, error: str) -> None:
     with _conn() as c:
         c.execute(
             "UPDATE article SET "
-            "  status = 'failed', "
+            "  summary_status = 'failed', "
             "  summary_error = ? "
             "WHERE id = ?",
             (error, article_id),
@@ -360,14 +294,15 @@ def mark_summary_failed(article_id: int, error: str) -> None:
 # ============ Stage 2.2: publisher 用的查询/写入 ============
 
 def fetch_pending_publish(limit: int = 5) -> list[dict]:
-    """取出"已摘要、未发布"的文章，按来源轮询。"""
+    """取出"已摘要、未发布"的文章，按来源轮询确保各源均匀。"""
     with _conn() as c:
         rows = c.execute(
             "SELECT id, source, title, url, summary FROM article "
-            "WHERE status = 'summarized' "
+            "WHERE summary_status = 'summarized' "
+            "  AND publish_status = 'pending' "
             "  AND summary IS NOT NULL "
             "ORDER BY id ASC LIMIT ?",
-            (limit * 5,),
+            (limit * 5,),   # 多取以便轮询有足够候选
         ).fetchall()
     return _round_robin([dict(r) for r in rows], limit)
 
@@ -375,7 +310,7 @@ def fetch_pending_publish(limit: int = 5) -> list[dict]:
 def mark_publishing(article_id: int) -> None:
     with _conn() as c:
         c.execute(
-            "UPDATE article SET status='publishing' WHERE id = ?",
+            "UPDATE article SET publish_status='publishing' WHERE id = ?",
             (article_id,),
         )
 
@@ -384,7 +319,7 @@ def mark_published(article_id: int) -> None:
     with _conn() as c:
         c.execute(
             "UPDATE article SET "
-            "  status = 'published', "
+            "  publish_status = 'published', "
             "  publish_at = CURRENT_TIMESTAMP, "
             "  publish_error = NULL "
             "WHERE id = ?",
@@ -396,7 +331,7 @@ def mark_publish_failed(article_id: int, error: str) -> None:
     with _conn() as c:
         c.execute(
             "UPDATE article SET "
-            "  status = 'failed', "
+            "  publish_status = 'failed', "
             "  publish_error = ? "
             "WHERE id = ?",
             (error, article_id),
@@ -404,13 +339,20 @@ def mark_publish_failed(article_id: int, error: str) -> None:
 
 
 def reset_publish_failed_to_pending() -> int:
-    """把 publish 失败的条目重置回 summarized（仅当是自己这步失败的）。"""
     with _conn() as c:
         n = c.execute(
-            "UPDATE article SET status='summarized', publish_error=NULL "
-            "WHERE status='failed' AND publish_error IS NOT NULL"
+            "UPDATE article SET publish_status='pending', publish_error=NULL "
+            "WHERE publish_status='failed'"
         ).rowcount
     return n
+
+
+def publish_stats() -> dict:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT publish_status, COUNT(*) AS n FROM article GROUP BY publish_status"
+        ).fetchall()
+    return {r["publish_status"] or "(null)": r["n"] for r in rows}
 
 
 if __name__ == "__main__":
@@ -418,3 +360,5 @@ if __name__ == "__main__":
     print(f"✓ 数据库已就绪：{DB_PATH}")
     print(f"  article_queue: {queue_stats()}")
     print(f"  article:       {article_stats()}")
+    print(f"  summary:       {summary_stats()}")
+    print(f"  publish:       {publish_stats()}")

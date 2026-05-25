@@ -70,18 +70,18 @@ def summarize_one(client: Client, source: str, title: str, body: str) -> str:
 
 
 def reset_failed_to_pending() -> int:
-    """把 status=failed 的条目改回 pending，让本批次重试。"""
+    """把摘要失败的条目改回 clipped，让本批次重试（只重置 summary 阶段的失败）。"""
     with news_db.conn() as c:
         n = c.execute(
-            "UPDATE article SET summary_status='pending', summary_error=NULL "
-            "WHERE summary_status='failed'"
+            "UPDATE article SET status='clipped', summary_error=NULL "
+            "WHERE status='failed' AND summary_error IS NOT NULL"
         ).rowcount
     return n
 
 
 def run(limit: int, retry: bool) -> None:
     if not GEMINI_API_KEY:
-        print("❌ GEMINI_API_KEY 未配置，请检查 config.json")
+        print("❌ GEMINI_API_KEY 未配置，请检查 config.yaml")
         return
 
     news_db.init_db()
