@@ -71,7 +71,7 @@ def run(limit: int, dry_run: bool, retry: bool) -> None:
     if dry_run:
         print("🧪 DRY-RUN：只预览消息，不真发\n")
     else:
-        print(f"🔌 通过 {PROXY_URL} 接入 Telegram\n")
+        print(f"🔌 通过 {PROXY_URL or '直连'} 接入 Telegram\n")
 
     bot = telebot.TeleBot(TG_BOT_TOKEN) if not dry_run else None
     ok, fail, aborted = 0, 0, False

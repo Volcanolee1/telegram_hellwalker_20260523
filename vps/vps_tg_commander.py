@@ -36,12 +36,14 @@ def send_welcome(message):
 @bot.message_handler(commands=['stats'], func=verify_admin)
 def handle_stats(message):
     """查看数据库实时状态"""
-    stats = news_db.queue_stats()
+    stats = news_db.article_stats()
     reply = (
         "📈 **当前流水线状态**\n"
-        f"⏳ 待抓取 (Pending): {stats.get('pending', 0)}\n"
-        f"✅ 已抓取 (Clipped): {stats.get('clipped', 0)}\n"
-        f"❌ 失败死信 (Failed): {stats.get('failed', 0)}\n"
+        f"📥 待摘要 (Clipped): {stats.get('clipped', 0)}\n"
+        f"📝 已摘要 (Summarized): {stats.get('summarized', 0)}\n"
+        f"📤 已发布 (Published): {stats.get('published', 0)}\n"
+        f"❌ 失败 (Failed): {stats.get('failed', 0)}\n"
+        f"📊 总计: {stats.get('total', 0)}\n"
     )
     bot.reply_to(message, reply, parse_mode="Markdown")
 

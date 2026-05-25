@@ -4,7 +4,13 @@ import threading
 
 from vps_orchestrator import run_cloud_cycle
 from config_loader import API_TOKEN
+from sources import HOMEPAGES
 import news_db
+
+# source → (country, tags) 映射表，API 入库时用
+_SOURCE_META: dict[str, tuple[str, str]] = {
+    s.name: (s.country, ",".join(s.tags)) for s in HOMEPAGES
+}
 
 app = FastAPI()
 
@@ -47,13 +53,18 @@ async def post_news(news: NewsItema, background_tasks: BackgroundTasks, token: s
 
     news_db.init_db()
 
+    # 从 source 名解析 country + tags
+    country, tags = _SOURCE_META.get(news.source, ("INTL", ""))
+
     # 写入 article 表，直接进入流水线（status='clipped'）
     with news_db.conn() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT OR IGNORE INTO article (source, title, url, body, body_length, status) "
-            "VALUES (?, ?, ?, ?, ?, 'clipped')",
-            (news.source, news.title, news.link, news.summary, len(news.summary or "")),
+            "INSERT OR IGNORE INTO article "
+            "(source, title, url, body, body_length, country, tags, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'clipped')",
+            (news.source, news.title, news.link, news.summary,
+             len(news.summary or ""), country, tags),
         )
         inserted_rows = cur.rowcount
 

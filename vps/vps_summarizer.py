@@ -42,8 +42,10 @@ SYSTEM_INSTRUCTION = (
 
 
 def make_client() -> genai.Client:
-    http_options = types.HttpOptions(client_args={"proxy": PROXY_URL})
-    return genai.Client(api_key=GEMINI_API_KEY, http_options=http_options)
+    if PROXY_URL:
+        http_options = types.HttpOptions(client_args={"proxy": PROXY_URL})
+        return genai.Client(api_key=GEMINI_API_KEY, http_options=http_options)
+    return genai.Client(api_key=GEMINI_API_KEY)
 
 def summarize_one(client: genai.Client, source: str, title: str, body: str) -> str:
     body_clipped = (body or "")[:MAX_INPUT_CHARS]
