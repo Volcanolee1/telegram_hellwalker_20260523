@@ -54,10 +54,6 @@ SOURCE_TO_CHANNEL = {
     # JP
     "NHKWorld":      "US",
     "NikkeiAsia":    "US",
-    # RU
-    "RT":            "US",
-    # ME
-    "AlJazeera":     "US",
 }
 DEFAULT_CHANNEL = "US"
 

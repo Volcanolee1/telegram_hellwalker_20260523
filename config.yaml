@@ -1,0 +1,75 @@
+model_list:
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: openai/deepseek-v4-flash
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000014
+      output_cost_per_token: 0.00000028
+      drop_params: true
+      custom_llm_provider: openai
+      aliases:
+      - claude-4-6-sonnet-20241022
+      - claude-4-6-sonnet-latest
+      - claude-4-7-opus-20240229
+      - claude-4-7-opus-latest
+     
+
+  - model_name: gpt-5.1-codex
+    litellm_params:
+      model: openai/gpt-5.1-codex
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00000625
+    
+
+  - model_name: gpt-5.4-mini
+    litellm_params:
+      model: openai/gpt-5.4-mini
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000075
+      output_cost_per_token: 0.00000450
+     
+
+  - model_name: gemini-3.1-flash-lite
+    litellm_params:
+      model: gemini/gemini-3.1-flash-lite
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000025
+      output_cost_per_token: 0.00000150
+     
+
+  - model_name: gemini-3.5-flash
+    litellm_params:
+      model: gemini/gemini-3.5-flash
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000150
+      output_cost_per_token: 0.00000900
+      
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000170
+      output_cost_per_token: 0.00000340
+      
+
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: openai/deepseek-v4-flash
+      api_base: https://api.apiyi.com/v1
+      api_key: sk-pNrHOgvJSAcWbu2L800552D541E849A0B7F91d4a60C4A5C3
+      input_cost_per_token: 0.00000014
+      output_cost_per_token: 0.00000028
+      
+
+router_settings:
+  model_mapping:
+    claude-sonnet-4-6: deepseek-v4-flash    
+    claude-3-5-sonnet: deepseek-v4-flash        
