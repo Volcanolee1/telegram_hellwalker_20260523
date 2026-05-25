@@ -1,16 +1,33 @@
 from fastapi import FastAPI, Header, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import sqlite3
+import threading
 from pathlib import Path
 
-# 🚀 新增导入：把你的云端大脑核心逻辑接进来
-from orchestrator_cloud import run_cloud_cycle
+from vps_orchestrator import run_cloud_cycle
+from config_loader import API_TOKEN
 
 app = FastAPI()
-API_TOKEN = "h6C99Ylz_qubklLALk0X5Dn12FlFkblh6M013qhySTFezY01TmAaD0aD0"
+
+# 防并发：同一时间只允许一个流水线实例运行
+_pipeline_lock = threading.Lock()
+_pipeline_running = False
+
+def _safe_pipeline():
+    global _pipeline_running
+    with _pipeline_lock:
+        if _pipeline_running:
+            print("  -> ⏭️ 流水线已在运行中，跳过本次调度")
+            return
+        _pipeline_running = True
+    try:
+        run_cloud_cycle()
+    finally:
+        with _pipeline_lock:
+            _pipeline_running = False
 
 # 动态获取当前文件所在目录，数据库将直接建在这个目录下
-DB_PATH = Path(__file__).parent / "news_data.db"
+DB_PATH = Path(__file__).parent / "commander.db"
 
 class NewsItema(BaseModel):
     source: str
@@ -62,7 +79,7 @@ async def post_news(news: NewsItema, background_tasks: BackgroundTasks, token: s
         if inserted_rows > 0:
             print("  -> 💾 新情报已安全存入云端数据库！")
             # 🚀 修改 3：触发后台任务
-            background_tasks.add_task(run_cloud_cycle)
+            background_tasks.add_task(_safe_pipeline)
             print("  -> 🧠 已通知云端大脑在后台启动摘要与发布流水线...")
         else:
             print("  -> ⏸️ 发现重复情报 (触发 IGNORE)，云端大脑继续休眠。")
@@ -78,4 +95,4 @@ async def post_news(news: NewsItema, background_tasks: BackgroundTasks, token: s
 if __name__ == "__main__":
     import uvicorn
     # 彻底告别加载报错！
-    uvicorn.run("api_server:app", host="0.0.0.0", port=8008, reload=False)
+    uvicorn.run("vps_api_server:app", host="0.0.0.0", port=8008, reload=False)

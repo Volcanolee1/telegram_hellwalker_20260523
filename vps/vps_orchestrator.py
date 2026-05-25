@@ -1,14 +1,8 @@
 import sys
-import os
-import site
 import time
 import traceback
 from datetime import datetime
 import news_db
-
-print(f"DEBUG: Python executable: {sys.executable}")
-print(f"DEBUG: sys.path: {sys.path}")
-print(f"DEBUG: site.getsitepackages(): {site.getsitepackages()}")
 
 # ── 云端流水线批次设置 ──────────────────────────────────────────
 SUMMARY_BATCH = 10 
@@ -18,7 +12,7 @@ def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
 def step_summarize(batch: int) -> None:
-    from summarizer import run as summarize_run
+    from vps_summarizer import run as summarize_run
     print(f"\n[{ts()}] ── 云端 SUMMARIZE (max {batch}) ──")
     summarize_run(limit=batch, retry=False)
 
