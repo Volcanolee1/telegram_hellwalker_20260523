@@ -18,9 +18,9 @@ from datetime import datetime
 import news_db
 
 # ── 各步骤默认批量上限 ──────────────────────────────────────────
-CLIP_BATCH     = 20   # 每轮最多 clip 多少篇（太大会让 Chrome 一直工作）
-SUMMARY_BATCH  = 10   # 每轮最多摘要多少篇（~30-40k token/轮）
-PUBLISH_BATCH  = 5    # 每轮最多推 TG 多少篇（避免一次性刷屏频道）
+CLIP_BATCH     = 3   # 每轮最多 clip 多少篇（太大会让 Chrome 一直工作）
+SUMMARY_BATCH  = 3   # 每轮最多摘要多少篇（~30-40k token/轮）
+PUBLISH_BATCH  = 3    # 每轮最多推 TG 多少篇（避免一次性刷屏频道）
 
 
 def ts() -> str:

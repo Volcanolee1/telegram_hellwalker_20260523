@@ -27,40 +27,14 @@ DELAY_BETWEEN_S = 2.0   # 礼貌间隔，TG 频道 30 msg/sec 上限远高于这
 CHANNEL_MAP = {"US": US_CHANNEL, "CN": CN_CHANNEL}
 
 
-# 来源 → 频道 路由表。CN 来源 → @HellWalker_CN_DailyNews；其余 → @HellWalker_DailyNews。
-SOURCE_TO_CHANNEL = {
-    # US
-    "Bloomberg":     "US",
-    "Reuters":       "US",
-    "NYT":           "US",
-    "APNews":        "US",
-    "Politico":      "US",
-    "CNBC":          "US",
-    "TechCrunch":    "US",
-    "DefenseNews":   "US",
-    "WarOnTheRocks": "US",
-    # UK
-    "BBC":           "US",
-    "TheGuardian":   "US",
-    "FT":            "US",
-    # EU
-    "France24":      "US",
-    "DW":            "US",
-    "EUobserver":    "US",
-    # CN
-    "GlobalTimes":   "CN",
-    "SCMP":          "CN",
-    "XinhuaNet":     "CN",
-    # JP
-    "NHKWorld":      "US",
-    "NikkeiAsia":    "US",
-}
+from sources import SOURCE_CHANNEL_MAP
+
 DEFAULT_CHANNEL = "US"
 
 
 def resolve_channel(source: str) -> tuple[str, str]:
     """返回 (region_label, channel_id)。"""
-    region = SOURCE_TO_CHANNEL.get(source, DEFAULT_CHANNEL)
+    region = SOURCE_CHANNEL_MAP.get(source, DEFAULT_CHANNEL)
     channel = CHANNEL_MAP.get(region)
     if not channel:
         raise RuntimeError(f"未找到 {region} 对应的频道，请检查 config.json 和 CHANNEL_MAP")
@@ -78,14 +52,14 @@ def format_message(source: str, title: str, url: str, summary: str) -> str:
 
 def run(limit: int, dry_run: bool, retry: bool) -> None:
     if not TG_BOT_TOKEN:
-        print("❌ TG_BOT_TOKEN 未配置，请检查 config.json")
+        print("❌ TG_BOT_TOKEN 未配置，请检查 config.yaml")
         return
 
     news_db.init_db()
 
     if retry:
         n = news_db.reset_publish_failed_to_pending()
-        print(f"🔄 重试模式：已把 {n} 条 publish_status=failed 重置为 pending")
+        print(f"🔄 重试模式：已把 {n} 条 发布失败 重置为 summarized")
 
     pending = news_db.fetch_pending_publish(limit=limit)
     if not pending:

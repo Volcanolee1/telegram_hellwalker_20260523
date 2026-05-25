@@ -59,10 +59,14 @@ def patrol_one_site(page, src: Source) -> int:
     print(f"\n[巡逻] {src.name} ({src.country}/{','.join(src.tags)}) → {src.homepage}")
     try:
         page.goto(src.homepage, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(2500)
+        page.wait_for_timeout(6000)
         candidates = page.evaluate(EXTRACT_JS, src.selector)
     except Exception as e:
         print(f"  ⚠️ 巡逻失败：{e}")
+        try:
+            page.goto("about:blank", wait_until="commit", timeout=5000)
+        except Exception:
+            pass
         return 0
 
     tags_str = ",".join(src.tags)

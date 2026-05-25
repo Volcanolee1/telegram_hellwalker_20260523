@@ -15,10 +15,8 @@
 import argparse
 import time
 
-from google.genai import Client
+from google import genai
 from google.genai import types
-
-
 
 from config_loader import GEMINI_API_KEY, PROXY_URL
 import news_db
@@ -43,11 +41,11 @@ SYSTEM_INSTRUCTION = (
 )
 
 
-def make_client() -> Client:
+def make_client() -> genai.Client:
     http_options = types.HttpOptions(client_args={"proxy": PROXY_URL})
-    return Client(api_key=GEMINI_API_KEY, http_options=http_options)
+    return genai.Client(api_key=GEMINI_API_KEY, http_options=http_options)
 
-def summarize_one(client: Client, source: str, title: str, body: str) -> str:
+def summarize_one(client: genai.Client, source: str, title: str, body: str) -> str:
     body_clipped = (body or "")[:MAX_INPUT_CHARS]
     user_content = (
         f"来源: {source}\n"
@@ -69,11 +67,11 @@ def summarize_one(client: Client, source: str, title: str, body: str) -> str:
 
 
 def reset_failed_to_pending() -> int:
-    """把 status=failed 的条目改回 pending，让本批次重试。"""
+    """把摘要失败的条目改回 clipped，让本批次重试（只重置 summary 阶段的失败）。"""
     with news_db.conn() as c:
         n = c.execute(
-            "UPDATE article SET summary_status='pending', summary_error=NULL "
-            "WHERE summary_status='failed'"
+            "UPDATE article SET status='clipped', summary_error=NULL "
+            "WHERE status='failed' AND summary_error IS NOT NULL"
         ).rowcount
     return n
 

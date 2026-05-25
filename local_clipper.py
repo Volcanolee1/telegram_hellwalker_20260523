@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 # ==================== 配置区 ====================
 VPS_IP = "107.174.159.191"
-API_URL = f"http://{VPS_IP}:8000/post-news"
+API_URL = f"http://{VPS_IP}:8008/post-news"
 TOKEN = "h6C99Ylz_qubklLALk0X5Dn12FlFkblh6M013qhySTFezY01TmAaD0aD0" 
 
 # 1. 你的“特工隔离安全屋”路径
